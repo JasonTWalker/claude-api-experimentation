@@ -1,0 +1,25 @@
+{
+  "name": "claudeapiclientexperimentation",
+  "version": "1.0.0",
+  "description": "TO experiment with Claude through TypeScript and Claude API calls",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JasonTWalker/ClaudeApiClientExperimentation.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/JasonTWalker/ClaudeApiClientExperimentation/issues"
+  },
+  "homepage": "https://github.com/JasonTWalker/ClaudeApiClientExperimentation#readme",
+  "devDependencies": {
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
