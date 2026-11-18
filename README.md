@@ -15,8 +15,12 @@ Messages API Parameters:
   - Custom interfaces defined in ./types.ts use this structure, only 'messages', 'model' and 'max_tokens' are required fields.
   - If there is a parameter you want to try, add it to the CreateMessageRequest interface, then define it when you create a new message request.
 
+Event Deltas:
+- https://platform.claude.com/docs/en/managed-agents/event-deltas
+  - Of different types containing different information.
+  - Examples of type "event_delta" with "content_delta" with "content" of type "text"
 
-  
+
 <hr>
 
 ### Usage Journey
@@ -66,3 +70,87 @@ Executing the above returned the following response:
 DO note that the model is non-deterministic, so the output will not always be identical to this, though should be similar. As the request messages ended on an assistant turn, the response finishes this turn - you can see this from the whitespace at the start of the response, caused by the assistant content ending on a comma. It's worth noting that even this leading whitespace wasn't consistently returned after sending this same request multiple times.
 
 </details>
+
+#### Using Streams with Messages API
+Streams are a way to process responses as they are sent over the Network, this is favourable for situations like Chat UIs and human-facing applications where you don't want to leave the user awaiting a response. Long responses are also useful, as it prevents the request hitting HTTP timeouts by breaking it up. 
+However when we start implementing tool_use loops it's not worth it as agentic loops only act on blocks once they're complete. For short responses the latency saving isn't worth introducing extra failure points either. 
+
+The following implementation is quite simple, and there are things to consider that will be covered. 
+
+<details><summary> Show Code </summary>
+
+Define the asynchronous generator function:
+
+```
+async function* streamMessage(  //function* denotes a generator function, asynchronous production
+    client: ClaudeClient,
+    req: CreateMessageRequest
+): AsyncGenerator<string> {     // async generator yields string values as they come
+    const res = await fetch(`${client["baseUrl"]}/messages`, {
+        method: "POST",
+        headers: {
+            "content-type": "application/json",
+            "x-api-key": client["apiKey"],
+            "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({ ...req, stream: true})   // set stream to true to enable streaming
+        // may have to assemble the complete message at the end when not using sdk
+        // ...req assembles request fields into a new object
+    })
+
+    if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+
+    const reader = res.body!.getReader(); // locks a reader to the stream, process incoming data as it arrives
+    const decoder = new TextDecoder();    //  convrts network byte data into text      
+    let buffer = "";                      // holds currently processed data that may not yet be finished
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;        // if 'done' then stream is finished
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n");   
+        buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+        if (!line.startsWith("data:")) continue;    // skip lines that aren't SSE data: 
+        const data = JSON.parse(line.replace("data:", "").trim()); // remove data prefix, parse as jsom
+        
+        // data.type refers to event type: 
+        // #https://platform.claude.com/docs/en/managed-agents/event-deltas
+        if (data.type === "content_block_delta" && data.delta?.text) { // keep only events that contain text fragment
+            yield data.delta.text;  // shows the text to the function caller
+            // paused until the next value is requested
+        } 
+    }
+  }
+}
+
+export { streamMessage }
+
+```
+
+Use it with ClaudeClient class and a structured MessageRequest
+
+```
+
+const cClient = new ClaudeClient(apiKey);
+
+const request: CreateMessageRequest = {
+  model: "claude-haiku-4-5-20251001",
+  max_tokens: 512,
+  messages: [{ role: "user", content: "In 2 short paragraps explain the benfits of streaming." }],
+};
+
+
+// note: still waits for the full message, just displays as it arrives
+// useful for chatbot/ text interactions giving user response asap
+for await (const text of streamMessage(cClient, request)) {
+  process.stdout.write(text); // Or append the fragment to a UI
+  // ^ console.log() prints each fragment to a newline
+}
+```
+
+</details>
+
+The primary issue with this is that it only 'cares' about content_block_delta. See resources above for more information on deltas. The error validation only checks the json response code, if it fails midway through stream there is no way of knowing, the existing output will be presented as complete, stop_reason is discarded.
