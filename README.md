@@ -161,3 +161,367 @@ Missing events include:
 - error, losing mid-stream failure reasons
 - content_block_start/stop, losing block boundaries required for tool use
 - non-text-deltas, such as input_json_delta, thinking_delta as they have no .text field
+
+
+<hr>
+
+#### Claude MEssages API w/ Tool Usage
+
+For the exploration in this, the descriptions from the guide I was following started to fall off and leant more towards pushing their API that they wanted to sell. The next few implementations have been build with the help of Claude chat, using my GitHub repository as a resource in the Project context for the chats.
+
+Let's cover the changes so far:
+
+- Updated type ContentBlock to be either TextBlock, ToolUseBlock or ToolResultBlock and defined what these block types should look like.
+
+```
+type TextBlock = { type: "text"; text: string};
+
+type ToolUseBlock = {     // sent by the "assistant", identifying the tool to use and inputs
+  type: "tool_use"; id: string; name: string; input: Record<string, unknown> 
+}
+
+type ToolResultBlock = {  // sent by the "user", after assistant ToolUseBlock, identifying the result of the tool use block
+ type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean;
+};
+
+type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock;
+
+```
+- Updated StopReason and corresponding field in MessageResponse to use them, as there are now more failure points as we move away from pure text-based API calls.
+
+```
+type StopReason =   | "end_turn" | "max_tokens" | "stop_sequence" | "tool_use" | "pause_turn" | "refusal";
+
+interface MessageResponse {
+  id: string;
+  type: "message";
+  role: "assistant";
+  content: ContentBlock[];
+  model: string;
+  stop_reason: StopReason | null;   // now references type StopReason
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+  };
+}
+```
+
+- As content field within MessageResponse above can now contain multiple types of ContentBlock; TextBlock or ToolUseBlock etc, we need to update our original Claude Client Example Usage:
+
+```
+response.content.forEach(element => {
+    console.log(element.text)
+});
+
+```
+
+Becomes:
+```
+response.content.forEach(element => {
+    if(element.type === "text") { console.log(element.text)};
+});
+```
+
+As ToolUseBlocks do not contain a text field.
+
+<details> <summary> Show Tool Use Loop Implementation</summary>
+
+Now we have defined our new ContentBlock types, it's time to use them. 
+
+
+Loop definition:
+
+```
+import { ClaudeClient } from './claude-client.js';
+import type { CreateMessageRequest, MessageResponse, MessageParam } from './types.js';
+
+type ToolHandler = (input: Record<string, unknown>) => Promise<string>; 
+
+async function runWithTools(
+    client: ClaudeClient,
+    req: CreateMessageRequest,              // model, max_toks, messages - also holds an array of ToolDefinition[] as tools
+    handlers: Record<string, ToolHandler>,  // map a tool name to the function that runs it, tools live in req.tools ^^
+    maxTurns = 10,                          // hard cap so a loop without a define stop doesn't burn tokens
+): Promise<MessageResponse> {
+    const messages: MessageParam[] = [...req.messages];     // copies array so loop can append to it without mutation - tool responses must be unmuted
+
+    for (let turn = 0; turn < maxTurns; turn++) {
+        const res = client.createMessage({...req, messages});   // copies original settings and messages, overrides old list
+        if ((await res).stop_reason !== "tool_use") {           // anything other than tool use = model has no requests, end loop
+            return res;
+        }
+
+        // record the assistant's turn
+        messages.push( {role: "assistant", content: (await res).content})
+        console.log(JSON.stringify(messages, null, 2))  // null replacer, 2 indentation 
+    }
+
+    throw new Error(`Tool loop exceeded ${maxTurns} turns`);
+}
+
+export { runWithTools };
+```
+
+Our example defined tool will be getTime, which ideally should return the current time formatted as an ISO 8601 string. The following implementation will return an error, as our handler (which maps a tool to the function that produces the result) is currently nonexistent - as such there will be no required ToolResultBlock produced by the 'user'. 
+
+- Define our tool and the request that will use it:
+
+```
+// define a tool
+const getTime: ToolDefinition = {               // model only ever sees name, description and input_schema
+    // decides when to call the tool from the description
+    name: "get_time",
+    description: "Returns the current date and time as an ISO 8601 string.",
+    input_schema: { type: "object", properties: {} },       // properties {} signifies the tool takes no arguments
+};
+
+// empty handler
+const handlers = {};
+
+
+// define a request
+const request: CreateMessageRequest = {
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 512,
+    tools: [getTime],
+    messages:
+    [
+        { 
+            role: "user", content: "What's the current time?" 
+        }
+    ],
+};
+
+```
+
+- Try/Catch block so we can see our error:
+
+```
+// try/catch as we expect this run to fail - due to 
+try {
+    const response = await runWithTools(claudeClient, request, handlers);
+    console.log("FInal response: " + response);
+} catch (err) {
+    console.log("Run failed w/ error: " + err);
+}
+  ```
+
+
+- Console Output On Execution:
+
+```
+  
+$ npx tsx claude-client-tool-usage-example-usage.ts
+[      // from our console.log in runWithTools loop, showing our messages
+  {
+    "role": "user",
+    "content": "What's the current time?"
+  },
+  {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_01HvryQmArDHidNdWgGcksLS",
+        "name": "get_time",
+        "input": {},
+        "caller": {
+          "type": "direct"
+        }
+      }
+    ]
+  }
+]
+Run failed w/ error: Error: Claude API error 400: {"type":"error","error":{"type":"invalid_request_error","message":"messages.1: `tool_use` ids were found without `tool_result` blocks immediately after: toolu_01HvryQmArDHidNdWgGcksLS. Each `tool_use` block must have a corresponding `tool_result` block in the next message."},"request_id":"req_011ChCEkkumbix7UvhCnxLMQ"}
+  
+  ```
+
+As you can see, we fail because we haven't defined a corresponding tool_result for our getTime tool - we will do this next.
+
+
+- Update runWIthTools to include a section to store the results of tool usage, and format as a user response.
+
+```
+async function runWithTools(
+    client: ClaudeClient,
+    req: CreateMessageRequest,              // model, max_toks, messages - also holds an array of ToolDefinition[] as tools
+    handlers: Record<string, ToolHandler>,  // map a tool name to the function that runs it, tools live in req.tools ^^
+    maxTurns = 10,                          // hard cap so a loop without a define stop doesn't burn tokens
+): Promise<MessageResponse> {
+    const messages: MessageParam[] = [...req.messages];     // copies array so loop can append to it without mutation - tool responses must be unmuted
+
+    for (let turn = 0; turn < maxTurns; turn++) {
+        const res = client.createMessage({...req, messages});   // copies original settings and messages, overrides old list
+        if ((await res).stop_reason !== "tool_use") {           // anything other than tool use = model has no requests, end loop
+            return res;
+        }
+
+        // record the assistant's turn
+        messages.push( {role: "assistant", content: (await res).content})
+
+        console.log(JSON.stringify(messages, null, 2))  // null replacer, 2 indentation 
+##########################################################################################################################
+        const results: ToolResultBlock[] = []; // store the results of our tool usage
+        for (const block of (await res).content) {
+            if (block.type !== "tool_use") continue;    // if text or otherwise, skip
+            const handler = handlers[block.name]; // match handler to the used tool
+
+            try {
+                if (!handler) throw new Error(`Unknown Tool: ${block.name}`);   //if handler to match tool doesnt exist, throw error
+                results.push( { type: "tool_result", tool_use_id: block.id, content: await handler(block.input) });
+            } catch (err) {     // if error occured add as user message with is_error true, //error message defined above of unknown tool
+                results.push({
+                    type: "tool_result",
+                    tool_use_id: block.id,
+                    content: err instanceof Error ? err.message : String(err),
+                    is_error: true
+                })
+            }
+        }
+        // add tool result block as a message from user
+        messages.push( {role: "user", content: results})
+        // log the now updated messages with the tool response block from the user
+        console.log(JSON.stringify(messages, null, 2));
+##########################################################################################################################    
+    }
+
+    throw new Error(`Tool loop exceeded ${maxTurns} turns`);
+```
+
+- Now the output from running the script doesn't directly error consistently, though sometimes it will retry the tool and we can see the issue:
+```
+  {
+    "role": "user",
+    "content": "What's the current time?"
+  },
+  {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_01SjxL2bof5ZAKyxfhZVyRUS",
+        "name": "get_time",
+        "input": {},
+        "caller": {
+          "type": "direct"
+        }
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "tool_result",
+        "tool_use_id": "toolu_01SjxL2bof5ZAKyxfhZVyRUS",
+        "content": "Unknown Tool: get_time",
+        "is_error": true
+      }
+    ]
+  },
+  {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "I apologize for the error. It seems there's an issue accessing the time tool. Let me try again:"
+      },
+      {
+        "type": "tool_use",
+        "id": "toolu_01PWV2GssiXMYHFzeEZSt7JE",
+        "name": "get_time",
+        "input": {},
+        "caller": {
+          "type": "direct"
+        }
+      }
+    ]
+  }
+]
+Final response: [object Object]
+```
+We can see that the is_error flag on the message is set to true, with the text content on the message relating to it. This is still due to our handler not having a defined ToolUseBlock to provide - so let's implement that.
+
+```
+const handlers = {
+    get_time: async () => new Date().toISOString(),
+};
+```
+
+Let's also change the way we show the response, by logging it directly:
+
+```
+const response = await runWithTools(claudeClient, request, handlers);
+console.log("stop_reason:", response.stop_reason);
+console.log(response)
+```
+
+We get this output: 
+
+```
+stop_reason: end_turn
+{
+  model: 'claude-haiku-4-5-20251001',
+  id: 'msg_011ChCQuzUkfzWgr4g9S48HY',
+  type: 'message',
+  role: 'assistant',
+  content: [
+    {
+      type: 'text',
+      text: 'The current time is **14:04:28 UTC** on **November 19, 2026** (2:04 PM and 28 seconds).'
+    }
+  ],
+  container: null,
+  stop_reason: 'end_turn',
+  stop_sequence: null,
+  stop_details: null,
+  usage: {
+    input_tokens: 620,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 0,
+    cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 0 },
+    output_tokens: 38,
+    service_tier: 'standard',
+    inference_geo: 'not_available',
+    speed: 'standard'
+  },
+  diagnostics: null
+}
+```
+
+With the Messages chain looking like this:
+
+```
+[
+  {
+    "role": "user",
+    "content": "What is the time?"
+  },
+  {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_01SbPnZyMRibyjTHqzbvEx4a",
+        "name": "get_time",
+        "input": {},
+        "caller": {
+          "type": "direct"
+        }
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "tool_result",
+        "tool_use_id": "toolu_01SbPnZyMRibyjTHqzbvEx4a",
+        "content": "2026-11-19T14:04:28.367Z"
+      }
+    ]
+  }
+]
+```
+
+</details>
