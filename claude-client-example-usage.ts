@@ -31,8 +31,10 @@ const response = await client.createMessage({
 ],
 });
 
+// response.content is an array of content blocks that at this state can be
+// ToolUseBlock, ToolResultBlock, TextBlock - not all have a text property. 
 response.content.forEach(element => {
-    console.log(element.text)
+    if(element.type === "text") { console.log(element.text)};
 });
 
 // console.log(response.content[0]?.text);
