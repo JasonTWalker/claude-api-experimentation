@@ -223,3 +223,119 @@ response.content.forEach(element => {
 ```
 
 As ToolUseBlocks do not contain a text field.
+
+<details> <summary> Show Tool Use Loop Implementation</summary>
+
+Now we have defined our new ContentBlock types, it's time to use them. 
+
+
+Loop definition:
+
+```
+import { ClaudeClient } from './claude-client.js';
+import type { CreateMessageRequest, MessageResponse, MessageParam } from './types.js';
+
+type ToolHandler = (input: Record<string, unknown>) => Promise<string>; 
+
+async function runWithTools(
+    client: ClaudeClient,
+    req: CreateMessageRequest,              // model, max_toks, messages - also holds an array of ToolDefinition[] as tools
+    handlers: Record<string, ToolHandler>,  // map a tool name to the function that runs it, tools live in req.tools ^^
+    maxTurns = 10,                          // hard cap so a loop without a define stop doesn't burn tokens
+): Promise<MessageResponse> {
+    const messages: MessageParam[] = [...req.messages];     // copies array so loop can append to it without mutation - tool responses must be unmuted
+
+    for (let turn = 0; turn < maxTurns; turn++) {
+        const res = client.createMessage({...req, messages});   // copies original settings and messages, overrides old list
+        if ((await res).stop_reason !== "tool_use") {           // anything other than tool use = model has no requests, end loop
+            return res;
+        }
+
+        // record the assistant's turn
+        messages.push( {role: "assistant", content: (await res).content})
+        console.log(JSON.stringify(messages, null, 2))  // null replacer, 2 indentation 
+    }
+
+    throw new Error(`Tool loop exceeded ${maxTurns} turns`);
+}
+
+export { runWithTools };
+```
+
+Our example defined tool will be getTime, which ideally should return the current time formatted as an ISO 8601 string. The following implementation will return an error, as our handler (which maps a tool to the function that produces the result) is currently nonexistent - as such there will be no required ToolResultBlock produced by the 'user'. 
+
+- Define our tool and the request that will use it:
+
+```
+// define a tool
+const getTime: ToolDefinition = {               // model only ever sees name, description and input_schema
+    // decides when to call the tool from the description
+    name: "get_time",
+    description: "Returns the current date and time as an ISO 8601 string.",
+    input_schema: { type: "object", properties: {} },       // properties {} signifies the tool takes no arguments
+};
+
+// empty handler
+const handlers = {};
+
+
+// define a request
+const request: CreateMessageRequest = {
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 512,
+    tools: [getTime],
+    messages:
+    [
+        { 
+            role: "user", content: "What's the current time?" 
+        }
+    ],
+};
+
+```
+
+- Try/Catch block so we can see our error:
+
+```
+// try/catch as we expect this run to fail - due to 
+try {
+    const response = await runWithTools(claudeClient, request, handlers);
+    console.log("FInal response: " + response);
+} catch (err) {
+    console.log("Run failed w/ error: " + err);
+}
+  ```
+
+
+- Console Output On Execution:
+
+```
+  
+$ npx tsx claude-client-tool-usage-example-usage.ts
+[      // from our console.log in runWithTools loop, showing our messages
+  {
+    "role": "user",
+    "content": "What's the current time?"
+  },
+  {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_01HvryQmArDHidNdWgGcksLS",
+        "name": "get_time",
+        "input": {},
+        "caller": {
+          "type": "direct"
+        }
+      }
+    ]
+  }
+]
+Run failed w/ error: Error: Claude API error 400: {"type":"error","error":{"type":"invalid_request_error","message":"messages.1: `tool_use` ids were found without `tool_result` blocks immediately after: toolu_01HvryQmArDHidNdWgGcksLS. Each `tool_use` block must have a corresponding `tool_result` block in the next message."},"request_id":"req_011ChCEkkumbix7UvhCnxLMQ"}
+  
+  ```
+
+As you can see, we fail because we haven't defined a corresponding tool_result for our getTime tool - we will do this next.
+
+</details>
