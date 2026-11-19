@@ -161,3 +161,65 @@ Missing events include:
 - error, losing mid-stream failure reasons
 - content_block_start/stop, losing block boundaries required for tool use
 - non-text-deltas, such as input_json_delta, thinking_delta as they have no .text field
+
+
+<hr>
+
+#### Claude MEssages API w/ Tool Usage
+
+For the exploration in this, the descriptions from the guide I was following started to fall off and leant more towards pushing their API that they wanted to sell. The next few implementations have been build with the help of Claude chat, using my GitHub repository as a resource in the Project context for the chats.
+
+Let's cover the changes so far:
+
+- Updated type ContentBlock to be either TextBlock, ToolUseBlock or ToolResultBlock and defined what these block types should look like.
+
+```
+type TextBlock = { type: "text"; text: string};
+
+type ToolUseBlock = {     // sent by the "assistant", identifying the tool to use and inputs
+  type: "tool_use"; id: string; name: string; input: Record<string, unknown> 
+}
+
+type ToolResultBlock = {  // sent by the "user", after assistant ToolUseBlock, identifying the result of the tool use block
+ type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean;
+};
+
+type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock;
+
+```
+- Updated StopReason and corresponding field in MessageResponse to use them, as there are now more failure points as we move away from pure text-based API calls.
+
+```
+type StopReason =   | "end_turn" | "max_tokens" | "stop_sequence" | "tool_use" | "pause_turn" | "refusal";
+
+interface MessageResponse {
+  id: string;
+  type: "message";
+  role: "assistant";
+  content: ContentBlock[];
+  model: string;
+  stop_reason: StopReason | null;   // now references type StopReason
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+  };
+}
+```
+
+- As content field within MessageResponse above can now contain multiple types of ContentBlock; TextBlock or ToolUseBlock etc, we need to update our original Claude Client Example Usage:
+
+```
+response.content.forEach(element => {
+    console.log(element.text)
+});
+
+```
+
+Becomes:
+```
+response.content.forEach(element => {
+    if(element.type === "text") { console.log(element.text)};
+});
+```
+
+As ToolUseBlocks do not contain a text field.
