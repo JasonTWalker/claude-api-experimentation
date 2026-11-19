@@ -16,7 +16,7 @@ Messages API Parameters:
   - If there is a parameter you want to try, add it to the CreateMessageRequest interface, then define it when you create a new message request.
 
 Event Deltas:
-- https://platform.claude.com/docs/en/managed-agents/event-deltas
+- https://platform.claude.com/docs/en/build-with-claude/streaming
   - Of different types containing different information.
   - Examples of type "event_delta" with "content_delta" with "content" of type "text"
 
@@ -24,6 +24,8 @@ Event Deltas:
 <hr>
 
 ### Usage Journey
+
+<details> <summary> Show RAW HTTP API Usage Journey - Up to Tool Usage (WARNING: LONG RAMBLINGS) </summary>
 
 #### Basic Messages API Usage
 
@@ -729,3 +731,6 @@ const divideRequest: CreateMessageRequest = {
 Oh no ! We hit our max_turn count !! Why? Because our tool_use loop copies the request, which now has tool_choice as a part of it, forcing it to be used every message turn - including where the model should be answering based on the tool result. Becuase of this, it can never produce end_turn and runs until the max turn count.
 
 If we want to rectify this we have to specify that the tool should be used on the first turn ONLY.
+
+
+</details>
