@@ -165,7 +165,7 @@ Missing events include:
 
 <hr>
 
-#### Claude MEssages API w/ Tool Usage
+#### Claude Messages API w/ Tool Usage
 
 For the exploration in this, the descriptions from the guide I was following started to fall off and leant more towards pushing their API that they wanted to sell. The next few implementations have been build with the help of Claude chat, using my GitHub repository as a resource in the Project context for the chats.
 
