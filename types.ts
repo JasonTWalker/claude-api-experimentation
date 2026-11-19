@@ -19,10 +19,10 @@ type ToolResultBlock = {  // sent by the "user", after assistant ToolUseBlock, i
  type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean;
 };
 
+type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock;
 
 // potentially split into UserContentBlock and AssistantContentBlock as both have restrictions - i.e. an assistant content block
 // shouldn't contain a ToolResultBlock
-type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock;
 
 type StopReason =     // et: normal case, natural finish; mt: hard limit cutoff, mid sentence or tool-call; ss: custom string to cause stoppage;
 // tu: model wants to run tools, run them, send back tool_result_block, call again; pt: long-running turn like web-search paused, send response back as-is to continue;
@@ -60,19 +60,5 @@ interface MessageResponse {
   };
 }
 
-// defines two types of content blocks, one for text and one for tool use
-type ContentBlockUninion =
-  | { type: "text"; text: string }
-  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> };
 
-// takes input of ContentBlockUnion and returns true if it is a tool_use block type
-function isToolUse(
-  block: ContentBlockUninion
-): block is { type: "tool_use"; id: string; name: string; input: Record<string, unknown> } {
-  return block.type === "tool_use";
-}
-
-// above two definitions enable looping over response.content and determining if they are of type text or tool_use
-
-
-export type { MessageParam, ContentBlock, ToolDefinition, MessageResponse, ContentBlockUninion, isToolUse }
+export type { MessageParam, ContentBlock, ToolDefinition, MessageResponse, ToolResultBlock, ToolUseBlock}
