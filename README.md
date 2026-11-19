@@ -73,7 +73,7 @@ DO note that the model is non-deterministic, so the output will not always be id
 
 #### Using Streams with Messages API
 Streams are a way to process responses as they are sent over the Network, this is favourable for situations like Chat UIs and human-facing applications where you don't want to leave the user awaiting a response. Long responses are also useful, as it prevents the request hitting HTTP timeouts by breaking it up. 
-However when we start implementing tool_use loops it's not worth it as agentic loops only act on blocks once they're complete. For short responses the latency saving isn't worth introducing extra failure points either. 
+However when we start implementing tool_use loops it's not worth it as agentic loops only act on blocks once they're complete. For short responses the latency saving isn't worth introducing extra failure points either. The stream: true flag changes how the server delivers the response, from a single 'Message' object as the body shape to a sequence of SSE events. 
 
 The following implementation is quite simple, and there are things to consider that will be covered. 
 
@@ -153,4 +153,11 @@ for await (const text of streamMessage(cClient, request)) {
 
 </details>
 
-The primary issue with this is that it only 'cares' about content_block_delta. See resources above for more information on deltas. The error validation only checks the json response code, if it fails midway through stream there is no way of knowing, the existing output will be presented as complete, stop_reason is discarded.
+The primary issue with this is that it only 'cares' about content_block_delta. See resources above for more information on deltas. The error validation only checks the json response code, if it fails midway through stream there is no way of knowing, the existing output will be presented as complete, stop_reason is discarded. 
+
+Missing events include:
+- message_start, losing input token ussage, message id, and the model used
+- message_delta, losing stop_reason and output token usage
+- error, losing mid-stream failure reasons
+- content_block_start/stop, losing block boundaries required for tool use
+- non-text-deltas, such as input_json_delta, thinking_delta as they have no .text field
