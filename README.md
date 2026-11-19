@@ -745,3 +745,29 @@ If we want to rectify this we have to specify that the tool should be used on th
 
 After going under the hood and understanding the amount of granular control the HTTP API offers using a simple fetch() wrapper - I have a deeper understanding of how the API works. However, for future learning I will be experimenting with the Anthropic SDK and following this course: 
 - https://anthropic.skilljar.com/claude-with-the-anthropic-api/
+
+Yep, import the package and define the client:
+
+```
+from dotenv import load_dotenv
+load_dotenv()
+
+from anthropic import Anthropic
+
+client = Anthropic()
+model = "claude-haiku-4-5-20251001" # cheapest model again lol
+```
+Then define the message same as with the simple fetch:
+```
+message = client.messages.create(
+    model=model,
+    max_tokens=64,
+    messages=[
+        {
+            "role": "user",
+            "content": "Hello, how are you?"
+        }
+    ]
+)
+```
+Though note we don't have control over the anthropic version, but takes less to setup - don't have to write our own custom client class.
