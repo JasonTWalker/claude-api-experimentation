@@ -169,6 +169,10 @@ Missing events include:
 
 For the exploration in this, the descriptions from the guide I was following started to fall off and leant more towards pushing their API that they wanted to sell. The next few implementations have been build with the help of Claude chat, using my GitHub repository as a resource in the Project context for the chats.
 
+
+<details> <summary> Show changes </summary>
+
+  
 Let's cover the changes so far:
 
 - Updated type ContentBlock to be either TextBlock, ToolUseBlock or ToolResultBlock and defined what these block types should look like.
@@ -223,6 +227,9 @@ response.content.forEach(element => {
 ```
 
 As ToolUseBlocks do not contain a text field.
+
+</details>
+
 
 <details> <summary> Show Tool Use Loop Implementation</summary>
 
@@ -525,3 +532,200 @@ With the Messages chain looking like this:
 ```
 
 </details>
+
+We have defined a tool getTime that takes no real arguments, it just returns the current time. Let's have a look at what a tool with arguments looks like - Claude suggested an example 'divide', which opens up potential failure cases where divide by 0 is requested. No point covering all the stuff prior, you can expand that if you want a more detailed breakdown of how the tool use loop is applied.
+
+<details><summary> Show divide_two_numbers tool definition and usage </summary>
+
+- Define the divide_two_numbers tool:
+```
+const divideTwoNumbers: ToolDefinition = {               // model only ever sees name, description and input_schema
+    name: "divide_two_numbers",
+    description: "Divide one number by another.",
+    input_schema: { 
+        type: "object", 
+        properties: {                                   // tool takes 2 arguments
+            a: {type: "number", description: "The dividend" },
+            b: { type: "number", description: "The divisor" },
+        },
+        required: ["a", "b"]                            // arguments are required as part of the schema
+    }, 
+}     
+
+```
+Note the change to input_schema, both a and b are required, and the model determines what these values should be.
+
+- Define the handler for the tool:
+  
+```
+const handlers = {
+    divide_two_numbers: async (input) => {
+        const { a, b } = input;
+        if (typeof a !== "number" || typeof b !== "number") {
+            throw new Error("a and b must be numbers");
+        }
+        if (b === 0) throw new Error("Cannot divide by zero");
+        return String(a / b);
+    },
+};
+```
+As you can see, we have defined cases in which the tool errors out.
+
+- Define the Message Request:
+```
+const divideRequest: CreateMessageRequest = {
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 512,
+    tools: [divideTwoNumbers],
+    messages:
+    [
+        { 
+            role: "user", content: "What 5 divided by 2?"
+        }
+    ],
+};
+```
+
+- Executing the script and logging the messages chain and response:
+```
+[
+  {
+    "role": "user",
+    "content": "What 5 divided by 2?"
+  },
+  {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_016bQFpBKo3ziQdqaq5USFtJ",
+        "name": "divide_two_numbers",
+        "input": {
+          "a": 5,
+          "b": 2
+        },
+        "caller": {
+          "type": "direct"
+        }
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "tool_result",
+        "tool_use_id": "toolu_016bQFpBKo3ziQdqaq5USFtJ",
+        "content": "2.5"
+      }
+    ]
+  }
+]
+stop_reason: end_turn
+{
+  model: 'claude-haiku-4-5-20251001',
+  id: 'msg_011ChCXQPhjsUfaPgzBv4Wni',
+  type: 'message',
+  role: 'assistant',
+  content: [ { type: 'text', text: '5 divided by 2 equals **2.5**.' } ],
+  container: null,
+  stop_reason: 'end_turn',
+  stop_sequence: null,
+  stop_details: null,
+  usage: {
+    input_tokens: 684,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 0,
+    cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 0 },
+    output_tokens: 16,
+    service_tier: 'standard',
+    inference_geo: 'not_available',
+    speed: 'standard'
+  },
+  diagnostics: null
+}
+```
+We can see our tool call and response.
+
+</details>
+
+IT is worth nothing that the model has some agency over when to call the tool. As "a" and "b" are designated as required fields, if we ask 
+
+"What is 5 divided by ?"
+
+IT never calls the tool in the first place, so it doesn't error out.
+
+<details> <summary> show response chain </summary>
+
+  ```
+[
+  {
+    "role": "user",
+    "content": "What 5 divided by ?"
+  }
+]
+stop_reason: end_turn
+{
+  model: 'claude-haiku-4-5-20251001',
+  id: 'msg_011ChCXuJNKQoU1Y4LFd3FwG',
+  type: 'message',
+  role: 'assistant',
+  content: [
+    {
+      type: 'text',
+      text: `I'd be happy to help you with division! However, your question "What 5 divided by ?" is incomplete. \n` +
+        '\n' +
+        'Could you please provide the divisor (the number you want to divide 5 by)? For example:\n' +
+        '- 5 divided by 2?\n' +
+        '- 5 divided by 10?\n' +
+        '- 5 divided by some other number?\n' +
+        '\n' +
+        'Once you let me know the second number, I can calculate it for you!'
+    }
+  ],
+  container: null,
+  stop_reason: 'end_turn',
+  stop_sequence: null,
+  stop_details: null,
+  usage: {
+    input_tokens: 594,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 0,
+    cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 0 },
+    output_tokens: 102,
+    service_tier: 'standard',
+    inference_geo: 'not_available',
+    speed: 'standard'
+  },
+  diagnostics: null
+}
+  
+  ```
+</details>
+
+We can FORCE tool usage using tool_choice parameter on CreateMessageRequest: 
+
+```
+tool_choice?: { type: "auto" | "any" } | { type: "tool"; name: string } | { type: "none" };
+```
+
+Then, pass it into the request: 
+
+```
+const divideRequest: CreateMessageRequest = {
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 512,
+    tools: [divideTwoNumbers],
+    messages:
+    [
+        { 
+            role: "user", content: "What 5 divided by ?"
+        }
+    ],
+    tool_choice: { type: "tool", name: "divide_two_numbers"}
+};
+```
+
+Oh no ! We hit our max_turn count !! Why? Because our tool_use loop copies the request, which now has tool_choice as a part of it, forcing it to be used every message turn - including where the model should be answering based on the tool result. Becuase of this, it can never produce end_turn and runs until the max turn count.
+
+If we want to rectify this we have to specify that the tool should be used on the first turn ONLY.
