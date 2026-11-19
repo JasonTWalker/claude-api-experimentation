@@ -25,6 +25,8 @@ Event Deltas:
 
 ### Usage Journey
 
+#### Raw Fetch API Wrapper 
+
 <details> <summary> Show RAW HTTP API Usage Journey - Up to Tool Usage (WARNING: LONG RAMBLINGS) </summary>
 
 #### Basic Messages API Usage
@@ -72,6 +74,8 @@ Executing the above returned the following response:
 DO note that the model is non-deterministic, so the output will not always be identical to this, though should be similar. As the request messages ended on an assistant turn, the response finishes this turn - you can see this from the whitespace at the start of the response, caused by the assistant content ending on a comma. It's worth noting that even this leading whitespace wasn't consistently returned after sending this same request multiple times.
 
 </details>
+
+<hr>
 
 #### Using Streams with Messages API
 Streams are a way to process responses as they are sent over the Network, this is favourable for situations like Chat UIs and human-facing applications where you don't want to leave the user awaiting a response. Long responses are also useful, as it prevents the request hitting HTTP timeouts by breaking it up. 
@@ -734,3 +738,10 @@ If we want to rectify this we have to specify that the tool should be used on th
 
 
 </details>
+
+<hr>
+
+#### Anthropic SDK Journey
+
+After going under the hood and understanding the amount of granular control the HTTP API offers using a simple fetch() wrapper - I have a deeper understanding of how the API works. However, for future learning I will be experimenting with the Anthropic SDK and following this course: 
+- https://anthropic.skilljar.com/claude-with-the-anthropic-api/
