@@ -17,8 +17,13 @@ Messages API Parameters:
 
 Event Deltas:
 - https://platform.claude.com/docs/en/build-with-claude/streaming
-  - Of different types containing different information.
-  - Examples of type "event_delta" with "content_delta" with "content" of type "text"
+  - Each 'packet' sent during streaming is contained within an event
+    - RawMessageStartEvent, signifies a new message is being sent#
+    - RawContentBlockStartEvent, starts a new block - containing text or tool use or otherwise
+    - RawContentBlockDeltaEvent, chunk related to the last content block that was started - e.g. more text for the text block
+    - RawContentBlockStopEvent, current content block completed - e.g. full text response complete
+    - RawMessageDeltaEvent, current message as a whole is complete, stop_reason, input/output tokens, etc
+    - RawMessageStopEvent, end of information about current event
 
 
 <hr>
@@ -771,3 +776,5 @@ message = client.messages.create(
 )
 ```
 Though note we don't have control over the anthropic version, but takes less to setup - don't have to write our own custom client class.
+
+For storing message turns, it is the same as with the raw API, concatenate user/assistant turns into an array and pass that in with the request.
